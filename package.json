@@ -1,0 +1,18 @@
+{
+  "name": "meesman-bot",
+  "version": "1.0.0",
+  "description": "Discord bot that tracks Meesman fund prices",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/register-commands.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.1",
+    "node-cron": "^3.0.3",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.3.1",
+    "sql.js": "^1.10.3"
+  }
+}
