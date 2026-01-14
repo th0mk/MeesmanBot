@@ -4,3 +4,4 @@ data/
 *.db
 tmpclaude-*
 .claude/
+dist/

@@ -2,11 +2,19 @@ import * as cheerio from 'cheerio';
 
 const FUND_URL = 'https://www.meesman.nl/onze-fondsen/aandelen-wereldwijd-totaal/';
 
+export interface FundData {
+  price: number | null;
+  priceDate: string | null;
+  isin: string | null;
+  annualCosts: number | null;
+  fetchedAt: string;
+  performances: Record<string, number>;
+}
+
 /**
  * Fetches and parses the Meesman fund page to extract price data
- * @returns {Promise<Object>} Fund data including price, date, and performance
  */
-export async function fetchFundData() {
+export async function fetchFundData(): Promise<FundData> {
   const response = await fetch(FUND_URL);
 
   if (!response.ok) {
@@ -16,12 +24,13 @@ export async function fetchFundData() {
   const html = await response.text();
   const $ = cheerio.load(html);
 
-  const data = {
+  const data: FundData = {
     price: null,
     priceDate: null,
     isin: null,
     annualCosts: null,
-    fetchedAt: new Date().toISOString()
+    fetchedAt: new Date().toISOString(),
+    performances: {}
   };
 
   // Find the price - typically in a prominent location on the page
@@ -59,13 +68,13 @@ export async function fetchFundData() {
   }
 
   // Extract performance data
-  const performances = {};
+  const performances: Record<string, number> = {};
   const perfPattern = /(\d{4})\s*[:.]?\s*(-?\d+[,.]?\d*)\s*%/g;
   let match;
   while ((match = perfPattern.exec(pageText)) !== null) {
     const year = match[1];
     const perf = parseFloat(match[2].replace(',', '.'));
-    if (year >= 2020 && year <= 2030) {
+    if (parseInt(year) >= 2020 && parseInt(year) <= 2030) {
       performances[year] = perf;
     }
   }
@@ -76,11 +85,8 @@ export async function fetchFundData() {
 
 /**
  * Calculates the percentage change between two prices
- * @param {number} oldPrice
- * @param {number} newPrice
- * @returns {number} Percentage change
  */
-export function calculatePercentageChange(oldPrice, newPrice) {
+export function calculatePercentageChange(oldPrice: number, newPrice: number): number {
   if (!oldPrice || oldPrice === 0) return 0;
   return ((newPrice - oldPrice) / oldPrice) * 100;
 }

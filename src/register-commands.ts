@@ -1,7 +1,7 @@
 import 'dotenv/config';
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
+import { REST, Routes, SlashCommandBuilder, RESTPostAPIChatInputApplicationCommandsJSONBody } from 'discord.js';
 
-const commands = [
+const commands: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [
   new SlashCommandBuilder()
     .setName('meesman-follow')
     .setDescription('Volg koersupdates van Meesman Aandelen Wereldwijd Totaal'),
@@ -23,14 +23,22 @@ const commands = [
     .setDescription('Controleer handmatig op koerswijzigingen')
 ].map(command => command.toJSON());
 
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+const token = process.env.DISCORD_TOKEN;
+const clientId = process.env.DISCORD_CLIENT_ID;
 
-async function registerCommands() {
+if (!token || !clientId) {
+  console.error('Missing DISCORD_TOKEN or DISCORD_CLIENT_ID in environment variables');
+  process.exit(1);
+}
+
+const rest = new REST({ version: '10' }).setToken(token);
+
+async function registerCommands(): Promise<void> {
   try {
     console.log('Started refreshing application (/) commands.');
 
     await rest.put(
-      Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),
+      Routes.applicationCommands(clientId!),
       { body: commands }
     );
 

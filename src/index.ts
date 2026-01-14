@@ -6,22 +6,24 @@ import {
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
-  SeparatorSpacingSize
+  SeparatorSpacingSize,
+  TextChannel
 } from 'discord.js';
 import cron from 'node-cron';
-import { fetchFundData, calculatePercentageChange } from './scraper.js';
+import { fetchFundData, calculatePercentageChange, FundData } from './scraper.js';
 import {
   initDatabase,
   getSubscriptions,
   addSubscription,
   removeSubscription,
-  isSubscribed,
   getSubscriptionCount,
   getLatestPrice,
   addPriceEntry,
   getPriceStats,
   getPriceHistory,
-  closeDatabase
+  closeDatabase,
+  PriceEntry,
+  PriceStats
 } from './storage.js';
 
 const client = new Client({
@@ -34,18 +36,18 @@ const MEESMAN_COLOR = 0x68DDE4;
 /**
  * Creates components for a price update
  */
-function createPriceUpdateComponents(currentData, previousData) {
+function createPriceUpdateComponents(currentData: FundData, previousData: PriceEntry | null): ContainerBuilder[] {
   const change = previousData
-    ? calculatePercentageChange(previousData.price, currentData.price)
+    ? calculatePercentageChange(previousData.price, currentData.price!)
     : 0;
 
   const changeSymbol = change > 0 ? '📈' : change < 0 ? '📉' : '➡️';
 
   // Build price info text
-  let priceText = `**Huidige koers:** €${currentData.price.toFixed(4)}`;
+  let priceText = `**Huidige koers:** €${currentData.price!.toFixed(4)}`;
 
   if (previousData) {
-    const absoluteChange = currentData.price - previousData.price;
+    const absoluteChange = currentData.price! - previousData.price;
     const changeSign = absoluteChange >= 0 ? '+' : '';
     priceText += `\n**Vorige koers:** €${previousData.price.toFixed(4)}`;
     priceText += `\n**Verschil:** ${changeSign}€${absoluteChange.toFixed(4)} (${changeSign}${change.toFixed(2)}%)`;
@@ -97,8 +99,8 @@ function createPriceUpdateComponents(currentData, previousData) {
 /**
  * Creates components for the current price status
  */
-function createStatusComponents(currentData, stats) {
-  let priceText = `**Huidige koers:** €${currentData.price.toFixed(4)}`;
+function createStatusComponents(currentData: FundData, stats: PriceStats): ContainerBuilder[] {
+  let priceText = `**Huidige koers:** €${currentData.price!.toFixed(4)}`;
 
   if (currentData.priceDate) {
     priceText += `\n**Koersdatum:** ${currentData.priceDate}`;
@@ -117,7 +119,7 @@ function createStatusComponents(currentData, stats) {
     );
 
   // Add stats if available
-  if (stats.count > 1) {
+  if (stats.count > 1 && stats.highest !== undefined && stats.lowest !== undefined && stats.average !== undefined) {
     const statsText = [
       `**Hoogste:** €${stats.highest.toFixed(4)}`,
       `**Laagste:** €${stats.lowest.toFixed(4)}`,
@@ -163,7 +165,7 @@ function createStatusComponents(currentData, stats) {
 /**
  * Checks for price updates and notifies subscribers
  */
-async function checkForUpdates() {
+async function checkForUpdates(): Promise<void> {
   console.log(`[${new Date().toISOString()}] Checking for price updates...`);
 
   try {
@@ -193,11 +195,11 @@ async function checkForUpdates() {
       for (const sub of subscriptions) {
         try {
           const channel = await client.channels.fetch(sub.channelId);
-          if (channel) {
-            await channel.send({ components, flags: MessageFlags.IsComponentsV2 });
+          if (channel && channel.isTextBased()) {
+            await (channel as TextChannel).send({ components, flags: MessageFlags.IsComponentsV2 });
           }
         } catch (err) {
-          console.error(`Failed to send to channel ${sub.channelId}:`, err.message);
+          console.error(`Failed to send to channel ${sub.channelId}:`, (err as Error).message);
         }
       }
 
@@ -232,7 +234,8 @@ client.on('interactionCreate', async (interaction) => {
 
     if (added) {
       await interaction.reply({
-        content: 'Dit kanaal volgt nu koersupdates van Meesman Aandelen Wereldwijd Totaal. Je ontvangt een melding wanneer de koers verandert.'      });
+        content: 'Dit kanaal volgt nu koersupdates van Meesman Aandelen Wereldwijd Totaal. Je ontvangt een melding wanneer de koers verandert.'
+      });
     } else {
       await interaction.reply({
         content: 'Dit kanaal volgt al koersupdates van Meesman Aandelen Wereldwijd Totaal.',
@@ -257,7 +260,8 @@ client.on('interactionCreate', async (interaction) => {
 
     if (removed) {
       await interaction.reply({
-        content: 'Dit kanaal volgt niet langer koersupdates van Meesman Aandelen Wereldwijd Totaal.'      });
+        content: 'Dit kanaal volgt niet langer koersupdates van Meesman Aandelen Wereldwijd Totaal.'
+      });
     } else {
       await interaction.reply({
         content: 'Dit kanaal volgde geen koersupdates van Meesman Aandelen Wereldwijd Totaal.',
@@ -357,7 +361,7 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 client.once('clientReady', () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`Logged in as ${client.user?.tag}`);
   console.log(`Tracking ${getSubscriptionCount()} channels`);
 
   // Schedule hourly checks on Monday (1) and Tuesday (2) between 8:00 and 22:00
@@ -386,12 +390,17 @@ process.on('SIGTERM', () => {
 });
 
 // Start the bot
-async function start() {
+async function start(): Promise<void> {
   console.log('Initializing database...');
   await initDatabase();
   console.log('Database initialized');
 
-  await client.login(process.env.DISCORD_TOKEN);
+  const token = process.env.DISCORD_TOKEN;
+  if (!token) {
+    throw new Error('DISCORD_TOKEN is not set');
+  }
+
+  await client.login(token);
 }
 
 start().catch(err => {

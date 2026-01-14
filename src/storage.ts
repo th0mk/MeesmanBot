@@ -1,4 +1,5 @@
-import initSqlJs from 'sql.js';
+import initSqlJs, { Database, Statement } from 'sql.js';
+import type { FundData } from './scraper.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -12,12 +13,38 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-let db = null;
+let db: Database | null = null;
+
+export interface Subscription {
+  guildId: string;
+  channelId: string;
+  subscribedAt: string;
+}
+
+export interface PriceEntry {
+  price: number;
+  priceDate: string | null;
+  fetchedAt: string;
+  performances: Record<string, number> | null;
+}
+
+export interface PriceStats {
+  count: number;
+  latest?: PriceEntry | null;
+  oldest?: {
+    price: number;
+    priceDate: string | null;
+    fetchedAt: string;
+  } | null;
+  highest?: number;
+  lowest?: number;
+  average?: number;
+}
 
 /**
  * Initialize the database
  */
-export async function initDatabase() {
+export async function initDatabase(): Promise<Database> {
   const SQL = await initSqlJs();
 
   // Load existing database or create new one
@@ -59,7 +86,7 @@ export async function initDatabase() {
 /**
  * Save the database to disk
  */
-function saveDatabase() {
+function saveDatabase(): void {
   if (!db) return;
   const data = db.export();
   const buffer = Buffer.from(data);
@@ -70,13 +97,14 @@ function saveDatabase() {
 
 /**
  * Gets all subscribed channels
- * @returns {Array<{guildId: string, channelId: string, subscribedAt: string}>}
  */
-export function getSubscriptions() {
-  const stmt = db.prepare('SELECT guild_id, channel_id, subscribed_at FROM subscriptions');
-  const results = [];
+export function getSubscriptions(): Subscription[] {
+  if (!db) throw new Error('Database not initialized');
+
+  const stmt: Statement = db.prepare('SELECT guild_id, channel_id, subscribed_at FROM subscriptions');
+  const results: Subscription[] = [];
   while (stmt.step()) {
-    const row = stmt.getAsObject();
+    const row = stmt.getAsObject() as { guild_id: string; channel_id: string; subscribed_at: string };
     results.push({
       guildId: row.guild_id,
       channelId: row.channel_id,
@@ -89,17 +117,17 @@ export function getSubscriptions() {
 
 /**
  * Adds a channel subscription
- * @param {string} guildId
- * @param {string} channelId
- * @returns {boolean} True if newly subscribed, false if already subscribed
+ * @returns True if newly subscribed, false if already subscribed
  */
-export function addSubscription(guildId, channelId) {
+export function addSubscription(guildId: string, channelId: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+
   try {
     db.run('INSERT INTO subscriptions (guild_id, channel_id, subscribed_at) VALUES (?, ?, datetime("now"))', [guildId, channelId]);
     saveDatabase();
     return true;
   } catch (err) {
-    if (err.message.includes('UNIQUE constraint failed')) {
+    if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
       return false;
     }
     throw err;
@@ -108,11 +136,11 @@ export function addSubscription(guildId, channelId) {
 
 /**
  * Removes a channel subscription
- * @param {string} guildId
- * @param {string} channelId
- * @returns {boolean} True if removed, false if not found
+ * @returns True if removed, false if not found
  */
-export function removeSubscription(guildId, channelId) {
+export function removeSubscription(guildId: string, channelId: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+
   const before = db.getRowsModified();
   db.run('DELETE FROM subscriptions WHERE guild_id = ? AND channel_id = ?', [guildId, channelId]);
   const after = db.getRowsModified();
@@ -125,12 +153,11 @@ export function removeSubscription(guildId, channelId) {
 
 /**
  * Checks if a channel is subscribed
- * @param {string} guildId
- * @param {string} channelId
- * @returns {boolean}
  */
-export function isSubscribed(guildId, channelId) {
-  const stmt = db.prepare('SELECT 1 FROM subscriptions WHERE guild_id = ? AND channel_id = ?');
+export function isSubscribed(guildId: string, channelId: string): boolean {
+  if (!db) throw new Error('Database not initialized');
+
+  const stmt: Statement = db.prepare('SELECT 1 FROM subscriptions WHERE guild_id = ? AND channel_id = ?');
   stmt.bind([guildId, channelId]);
   const exists = stmt.step();
   stmt.free();
@@ -139,12 +166,13 @@ export function isSubscribed(guildId, channelId) {
 
 /**
  * Gets subscription count
- * @returns {number}
  */
-export function getSubscriptionCount() {
-  const stmt = db.prepare('SELECT COUNT(*) as count FROM subscriptions');
+export function getSubscriptionCount(): number {
+  if (!db) throw new Error('Database not initialized');
+
+  const stmt: Statement = db.prepare('SELECT COUNT(*) as count FROM subscriptions');
   stmt.step();
-  const result = stmt.getAsObject();
+  const result = stmt.getAsObject() as { count: number };
   stmt.free();
   return result.count;
 }
@@ -153,20 +181,20 @@ export function getSubscriptionCount() {
 
 /**
  * Gets the price history (most recent first)
- * @param {number} limit
- * @returns {Array}
  */
-export function getPriceHistory(limit = 50) {
-  const stmt = db.prepare(`
+export function getPriceHistory(limit: number = 50): PriceEntry[] {
+  if (!db) throw new Error('Database not initialized');
+
+  const stmt: Statement = db.prepare(`
     SELECT price, price_date, fetched_at, performances
     FROM price_history
     ORDER BY id DESC
     LIMIT ?
   `);
   stmt.bind([limit]);
-  const results = [];
+  const results: PriceEntry[] = [];
   while (stmt.step()) {
-    const row = stmt.getAsObject();
+    const row = stmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string; performances: string | null };
     results.push({
       price: row.price,
       priceDate: row.price_date,
@@ -180,10 +208,11 @@ export function getPriceHistory(limit = 50) {
 
 /**
  * Gets the latest recorded price entry
- * @returns {Object|null}
  */
-export function getLatestPrice() {
-  const stmt = db.prepare(`
+export function getLatestPrice(): PriceEntry | null {
+  if (!db) throw new Error('Database not initialized');
+
+  const stmt: Statement = db.prepare(`
     SELECT price, price_date, fetched_at, performances
     FROM price_history
     ORDER BY id DESC
@@ -193,7 +222,7 @@ export function getLatestPrice() {
     stmt.free();
     return null;
   }
-  const row = stmt.getAsObject();
+  const row = stmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string; performances: string | null };
   stmt.free();
   return {
     price: row.price,
@@ -205,10 +234,11 @@ export function getLatestPrice() {
 
 /**
  * Gets the previous price entry (second most recent)
- * @returns {Object|null}
  */
-export function getPreviousPrice() {
-  const stmt = db.prepare(`
+export function getPreviousPrice(): PriceEntry | null {
+  if (!db) throw new Error('Database not initialized');
+
+  const stmt: Statement = db.prepare(`
     SELECT price, price_date, fetched_at, performances
     FROM price_history
     ORDER BY id DESC
@@ -218,7 +248,7 @@ export function getPreviousPrice() {
     stmt.free();
     return null;
   }
-  const row = stmt.getAsObject();
+  const row = stmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string; performances: string | null };
   stmt.free();
   return {
     price: row.price,
@@ -230,14 +260,15 @@ export function getPreviousPrice() {
 
 /**
  * Adds a price entry to history (updates if same price_date exists)
- * @param {Object} priceData
  */
-export function addPriceEntry(priceData) {
+export function addPriceEntry(priceData: FundData): void {
+  if (!db) throw new Error('Database not initialized');
+
   db.run(
     'INSERT OR REPLACE INTO price_history (price, price_date, fetched_at, performances) VALUES (?, ?, ?, ?)',
     [
       priceData.price,
-      priceData.priceDate,
+      priceData.priceDate ?? null,
       priceData.fetchedAt || new Date().toISOString(),
       priceData.performances ? JSON.stringify(priceData.performances) : null
     ]
@@ -247,19 +278,20 @@ export function addPriceEntry(priceData) {
 
 /**
  * Gets price statistics
- * @returns {Object}
  */
-export function getPriceStats() {
-  const countStmt = db.prepare('SELECT COUNT(*) as count FROM price_history');
+export function getPriceStats(): PriceStats {
+  if (!db) throw new Error('Database not initialized');
+
+  const countStmt: Statement = db.prepare('SELECT COUNT(*) as count FROM price_history');
   countStmt.step();
-  const count = countStmt.getAsObject().count;
+  const count = (countStmt.getAsObject() as { count: number }).count;
   countStmt.free();
 
   if (count === 0) {
     return { count: 0 };
   }
 
-  const statsStmt = db.prepare(`
+  const statsStmt: Statement = db.prepare(`
     SELECT
       MIN(price) as lowest,
       MAX(price) as highest,
@@ -267,19 +299,19 @@ export function getPriceStats() {
     FROM price_history
   `);
   statsStmt.step();
-  const stats = statsStmt.getAsObject();
+  const stats = statsStmt.getAsObject() as { lowest: number; highest: number; average: number };
   statsStmt.free();
 
   const latest = getLatestPrice();
 
-  const oldestStmt = db.prepare(`
+  const oldestStmt: Statement = db.prepare(`
     SELECT price, price_date, fetched_at
     FROM price_history
     ORDER BY id ASC
     LIMIT 1
   `);
   oldestStmt.step();
-  const oldest = oldestStmt.getAsObject();
+  const oldest = oldestStmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string };
   oldestStmt.free();
 
   return {
@@ -299,7 +331,7 @@ export function getPriceStats() {
 /**
  * Close the database connection (for cleanup)
  */
-export function closeDatabase() {
+export function closeDatabase(): void {
   if (db) {
     saveDatabase();
     db.close();

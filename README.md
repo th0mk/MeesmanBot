@@ -4,6 +4,7 @@ A Discord bot that tracks the Meesman "Aandelen Wereldwijd Totaal" fund price an
 
 ## Features
 
+- Written in TypeScript with full type safety
 - Automatic hourly price checks on Monday and Tuesday
 - Notifications when the fund price changes
 - Shows current price, previous price, and percentage change
@@ -30,15 +31,30 @@ A Discord bot that tracks the Meesman "Aandelen Wereldwijd Totaal" fund price an
    npm install
    ```
 
-6. Register slash commands:
+6. Build and register slash commands:
    ```bash
    npm run register
    ```
 
-7. Start the bot:
+7. Build and start the bot:
    ```bash
+   npm run dev
+   ```
+
+   Or build once and run:
+   ```bash
+   npm run build
    npm start
    ```
+
+## Scripts
+
+| Script | Description |
+|--------|-------------|
+| `npm run build` | Compile TypeScript to JavaScript |
+| `npm start` | Run the compiled bot |
+| `npm run dev` | Build and run the bot |
+| `npm run register` | Build and register slash commands |
 
 ## Commands
 
@@ -63,11 +79,12 @@ All data is stored in an SQLite database at `data/meesman.db`:
 ## Invite Link
 
 Generate an invite link with the following permissions:
+- `View Channels`
 - `Send Messages`
 - `Embed Links`
-- `Use Slash Commands`
+- `Use Application Commands`
 
 Example invite URL format:
 ```
-https://discord.com/api/oauth2/authorize?client_id=1460663524106829966&permissions=2147485696&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=1460663524106829966&permissions=2147503104&scope=bot%20applications.commands
 ```
