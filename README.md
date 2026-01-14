@@ -9,7 +9,7 @@ A Discord bot that tracks Meesman fund prices and notifies subscribed channels w
 
 ## Features
 
-- Written in TypeScript with full type safety
+- Written in TypeScript, runs with Bun
 - Support for multiple Meesman funds via dropdown selection
 - Automatic hourly price checks on Monday and Tuesday
 - Notifications when fund prices change
@@ -34,33 +34,32 @@ A Discord bot that tracks Meesman fund prices and notifies subscribed channels w
 
 5. Install dependencies:
    ```bash
-   npm install
+   bun install
    ```
 
-6. Build and register slash commands:
+6. Register slash commands:
    ```bash
-   npm run register
+   bun run register
    ```
 
-7. Build and start the bot:
+7. Start the bot:
    ```bash
-   npm run dev
+   bun start
    ```
 
-   Or build once and run:
+   Or with hot reload:
    ```bash
-   npm run build
-   npm start
+   bun run dev
    ```
 
 ## Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm run build` | Compile TypeScript to JavaScript |
-| `npm start` | Run the compiled bot |
-| `npm run dev` | Build and run the bot |
-| `npm run register` | Build and register slash commands |
+| `bun start` | Run the bot |
+| `bun run dev` | Run with hot reload (watch mode) |
+| `bun run register` | Register slash commands |
+| `bun run build` | Bundle for Node.js deployment |
 
 ## Commands
 

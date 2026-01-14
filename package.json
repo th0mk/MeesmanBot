@@ -2,24 +2,20 @@
   "name": "meesman-bot",
   "version": "1.0.0",
   "description": "Discord bot that tracks Meesman fund prices",
-  "main": "dist/index.js",
+  "main": "src/index.ts",
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js",
-    "register": "tsc && node dist/register-commands.js"
+    "start": "bun run src/index.ts",
+    "dev": "bun run --watch src/index.ts",
+    "register": "bun run src/register-commands.ts",
+    "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {
     "discord.js": "^14.25.1",
     "node-cron": "^3.0.3",
-    "cheerio": "^1.0.0-rc.12",
-    "dotenv": "^16.3.1",
-    "sql.js": "^1.10.3"
+    "cheerio": "^1.0.0-rc.12"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/node-cron": "^3.0.11",
-    "typescript": "^5.6.0"
+    "@types/node-cron": "^3.0.11"
   }
 }

@@ -1,19 +1,16 @@
-import initSqlJs, { Database, Statement } from 'sql.js';
+import { Database } from 'bun:sqlite';
 import type { FundData, FundType } from './scraper.js';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_PATH = path.join(DATA_DIR, 'meesman.db');
+const DATA_DIR = `${import.meta.dir}/../data`;
+const DB_PATH = `${DATA_DIR}/meesman.db`;
 
 // Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+import { mkdirSync, existsSync } from 'fs';
+if (!existsSync(DATA_DIR)) {
+  mkdirSync(DATA_DIR, { recursive: true });
 }
 
-let db: Database | null = null;
+const db = new Database(DB_PATH);
 
 export interface Subscription {
   guildId: string;
@@ -47,16 +44,6 @@ export interface PriceStats {
  * Initialize the database
  */
 export async function initDatabase(): Promise<Database> {
-  const SQL = await initSqlJs();
-
-  // Load existing database or create new one
-  if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-  } else {
-    db = new SQL.Database();
-  }
-
   // Initialize tables with fund_type support
   db.run(`
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -98,18 +85,7 @@ export async function initDatabase(): Promise<Database> {
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(fetched_at)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_fund ON price_history(fund_type)`);
 
-  saveDatabase();
   return db;
-}
-
-/**
- * Save the database to disk
- */
-function saveDatabase(): void {
-  if (!db) return;
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
 }
 
 // === Subscriptions ===
@@ -118,27 +94,22 @@ function saveDatabase(): void {
  * Gets all subscribed channels for a specific fund
  */
 export function getSubscriptions(fundType?: FundType): Subscription[] {
-  if (!db) throw new Error('Database not initialized');
-
   const query = fundType
-    ? 'SELECT guild_id, channel_id, fund_type, subscribed_at FROM subscriptions WHERE fund_type = ?'
-    : 'SELECT guild_id, channel_id, fund_type, subscribed_at FROM subscriptions';
+    ? db.query<{ guild_id: string; channel_id: string; fund_type: string; subscribed_at: string }, [string]>(
+        'SELECT guild_id, channel_id, fund_type, subscribed_at FROM subscriptions WHERE fund_type = ?'
+      )
+    : db.query<{ guild_id: string; channel_id: string; fund_type: string; subscribed_at: string }, []>(
+        'SELECT guild_id, channel_id, fund_type, subscribed_at FROM subscriptions'
+      );
 
-  const stmt: Statement = db.prepare(query);
-  if (fundType) stmt.bind([fundType]);
+  const rows = fundType ? query.all(fundType) : (query as ReturnType<typeof db.query<{ guild_id: string; channel_id: string; fund_type: string; subscribed_at: string }, []>>).all();
 
-  const results: Subscription[] = [];
-  while (stmt.step()) {
-    const row = stmt.getAsObject() as { guild_id: string; channel_id: string; fund_type: string; subscribed_at: string };
-    results.push({
-      guildId: row.guild_id,
-      channelId: row.channel_id,
-      fundType: row.fund_type as FundType,
-      subscribedAt: row.subscribed_at
-    });
-  }
-  stmt.free();
-  return results;
+  return rows.map(row => ({
+    guildId: row.guild_id,
+    channelId: row.channel_id,
+    fundType: row.fund_type as FundType,
+    subscribedAt: row.subscribed_at
+  }));
 }
 
 /**
@@ -146,11 +117,11 @@ export function getSubscriptions(fundType?: FundType): Subscription[] {
  * @returns True if newly subscribed, false if already subscribed
  */
 export function addSubscription(guildId: string, channelId: string, fundType: FundType): boolean {
-  if (!db) throw new Error('Database not initialized');
-
   try {
-    db.run('INSERT INTO subscriptions (guild_id, channel_id, fund_type, subscribed_at) VALUES (?, ?, ?, datetime("now"))', [guildId, channelId, fundType]);
-    saveDatabase();
+    db.run(
+      'INSERT INTO subscriptions (guild_id, channel_id, fund_type, subscribed_at) VALUES (?, ?, ?, datetime("now"))',
+      [guildId, channelId, fundType]
+    );
     return true;
   } catch (err) {
     if (err instanceof Error && err.message.includes('UNIQUE constraint failed')) {
@@ -165,46 +136,37 @@ export function addSubscription(guildId: string, channelId: string, fundType: Fu
  * @returns True if removed, false if not found
  */
 export function removeSubscription(guildId: string, channelId: string, fundType: FundType): boolean {
-  if (!db) throw new Error('Database not initialized');
-
-  db.run('DELETE FROM subscriptions WHERE guild_id = ? AND channel_id = ? AND fund_type = ?', [guildId, channelId, fundType]);
-  const deleted = db.getRowsModified();
-  if (deleted > 0) {
-    saveDatabase();
-    return true;
-  }
-  return false;
+  const result = db.run(
+    'DELETE FROM subscriptions WHERE guild_id = ? AND channel_id = ? AND fund_type = ?',
+    [guildId, channelId, fundType]
+  );
+  return result.changes > 0;
 }
 
 /**
  * Checks if a channel is subscribed to a specific fund
  */
 export function isSubscribed(guildId: string, channelId: string, fundType: FundType): boolean {
-  if (!db) throw new Error('Database not initialized');
-
-  const stmt: Statement = db.prepare('SELECT 1 FROM subscriptions WHERE guild_id = ? AND channel_id = ? AND fund_type = ?');
-  stmt.bind([guildId, channelId, fundType]);
-  const exists = stmt.step();
-  stmt.free();
-  return exists;
+  const result = db.query<{ exists: number }, [string, string, string]>(
+    'SELECT 1 as exists FROM subscriptions WHERE guild_id = ? AND channel_id = ? AND fund_type = ?'
+  ).get(guildId, channelId, fundType);
+  return result !== null;
 }
 
 /**
  * Gets subscription count
  */
 export function getSubscriptionCount(fundType?: FundType): number {
-  if (!db) throw new Error('Database not initialized');
-
-  const query = fundType
-    ? 'SELECT COUNT(*) as count FROM subscriptions WHERE fund_type = ?'
-    : 'SELECT COUNT(*) as count FROM subscriptions';
-
-  const stmt: Statement = db.prepare(query);
-  if (fundType) stmt.bind([fundType]);
-  stmt.step();
-  const result = stmt.getAsObject() as { count: number };
-  stmt.free();
-  return result.count;
+  if (fundType) {
+    const result = db.query<{ count: number }, [string]>(
+      'SELECT COUNT(*) as count FROM subscriptions WHERE fund_type = ?'
+    ).get(fundType);
+    return result?.count ?? 0;
+  }
+  const result = db.query<{ count: number }, []>(
+    'SELECT COUNT(*) as count FROM subscriptions'
+  ).get();
+  return result?.count ?? 0;
 }
 
 // === Price History ===
@@ -213,51 +175,37 @@ export function getSubscriptionCount(fundType?: FundType): number {
  * Gets the price history for a specific fund (most recent first)
  */
 export function getPriceHistory(fundType: FundType, limit: number = 50): PriceEntry[] {
-  if (!db) throw new Error('Database not initialized');
-
-  const stmt: Statement = db.prepare(`
+  const rows = db.query<{ fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null }, [string, number]>(`
     SELECT fund_type, price, price_date, fetched_at, performances
     FROM price_history
     WHERE fund_type = ?
     ORDER BY id DESC
     LIMIT ?
-  `);
-  stmt.bind([fundType, limit]);
-  const results: PriceEntry[] = [];
-  while (stmt.step()) {
-    const row = stmt.getAsObject() as { fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null };
-    results.push({
-      fundType: row.fund_type as FundType,
-      price: row.price,
-      priceDate: row.price_date,
-      fetchedAt: row.fetched_at,
-      performances: row.performances ? JSON.parse(row.performances) : null
-    });
-  }
-  stmt.free();
-  return results;
+  `).all(fundType, limit);
+
+  return rows.map(row => ({
+    fundType: row.fund_type as FundType,
+    price: row.price,
+    priceDate: row.price_date,
+    fetchedAt: row.fetched_at,
+    performances: row.performances ? JSON.parse(row.performances) : null
+  }));
 }
 
 /**
  * Gets the latest recorded price entry for a specific fund
  */
 export function getLatestPrice(fundType: FundType): PriceEntry | null {
-  if (!db) throw new Error('Database not initialized');
-
-  const stmt: Statement = db.prepare(`
+  const row = db.query<{ fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null }, [string]>(`
     SELECT fund_type, price, price_date, fetched_at, performances
     FROM price_history
     WHERE fund_type = ?
     ORDER BY id DESC
     LIMIT 1
-  `);
-  stmt.bind([fundType]);
-  if (!stmt.step()) {
-    stmt.free();
-    return null;
-  }
-  const row = stmt.getAsObject() as { fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null };
-  stmt.free();
+  `).get(fundType);
+
+  if (!row) return null;
+
   return {
     fundType: row.fund_type as FundType,
     price: row.price,
@@ -271,8 +219,6 @@ export function getLatestPrice(fundType: FundType): PriceEntry | null {
  * Adds a price entry to history (updates if same fund_type and price_date exists)
  */
 export function addPriceEntry(priceData: FundData): void {
-  if (!db) throw new Error('Database not initialized');
-
   db.run(
     'INSERT OR REPLACE INTO price_history (fund_type, price, price_date, fetched_at, performances) VALUES (?, ?, ?, ?, ?)',
     [
@@ -283,51 +229,39 @@ export function addPriceEntry(priceData: FundData): void {
       priceData.performances ? JSON.stringify(priceData.performances) : null
     ]
   );
-  saveDatabase();
 }
 
 /**
  * Gets price statistics for a specific fund
  */
 export function getPriceStats(fundType: FundType): PriceStats {
-  if (!db) throw new Error('Database not initialized');
-
-  const countStmt: Statement = db.prepare('SELECT COUNT(*) as count FROM price_history WHERE fund_type = ?');
-  countStmt.bind([fundType]);
-  countStmt.step();
-  const count = (countStmt.getAsObject() as { count: number }).count;
-  countStmt.free();
+  const countResult = db.query<{ count: number }, [string]>(
+    'SELECT COUNT(*) as count FROM price_history WHERE fund_type = ?'
+  ).get(fundType);
+  const count = countResult?.count ?? 0;
 
   if (count === 0) {
     return { count: 0 };
   }
 
-  const statsStmt: Statement = db.prepare(`
+  const stats = db.query<{ lowest: number; highest: number; average: number }, [string]>(`
     SELECT
       MIN(price) as lowest,
       MAX(price) as highest,
       AVG(price) as average
     FROM price_history
     WHERE fund_type = ?
-  `);
-  statsStmt.bind([fundType]);
-  statsStmt.step();
-  const stats = statsStmt.getAsObject() as { lowest: number; highest: number; average: number };
-  statsStmt.free();
+  `).get(fundType);
 
   const latest = getLatestPrice(fundType);
 
-  const oldestStmt: Statement = db.prepare(`
+  const oldest = db.query<{ price: number; price_date: string | null; fetched_at: string }, [string]>(`
     SELECT price, price_date, fetched_at
     FROM price_history
     WHERE fund_type = ?
     ORDER BY id ASC
     LIMIT 1
-  `);
-  oldestStmt.bind([fundType]);
-  oldestStmt.step();
-  const oldest = oldestStmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string };
-  oldestStmt.free();
+  `).get(fundType);
 
   return {
     count,
@@ -337,9 +271,9 @@ export function getPriceStats(fundType: FundType): PriceStats {
       priceDate: oldest.price_date,
       fetchedAt: oldest.fetched_at
     } : null,
-    highest: stats.highest,
-    lowest: stats.lowest,
-    average: stats.average
+    highest: stats?.highest,
+    lowest: stats?.lowest,
+    average: stats?.average
   };
 }
 
@@ -347,9 +281,5 @@ export function getPriceStats(fundType: FundType): PriceStats {
  * Close the database connection (for cleanup)
  */
 export function closeDatabase(): void {
-  if (db) {
-    saveDatabase();
-    db.close();
-    db = null;
-  }
+  db.close();
 }
