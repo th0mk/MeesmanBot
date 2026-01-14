@@ -4,23 +4,59 @@ import { REST, Routes, SlashCommandBuilder, RESTPostAPIChatInputApplicationComma
 const commands: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [
   new SlashCommandBuilder()
     .setName('meesman-follow')
-    .setDescription('Volg koersupdates van Meesman Aandelen Wereldwijd Totaal'),
+    .setDescription('Volg koersupdates van een Meesman fonds')
+    .addStringOption(option =>
+      option
+        .setName('fonds')
+        .setDescription('Welk fonds wil je volgen?')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Aandelen Wereldwijd Totaal', value: 'wereldwijd' },
+          { name: 'Aandelen Verantwoorde Toekomst', value: 'verantwoord' }
+        )
+    ),
 
   new SlashCommandBuilder()
     .setName('meesman-unfollow')
-    .setDescription('Stop met volgen van Meesman Aandelen Wereldwijd Totaal'),
+    .setDescription('Stop met volgen van een Meesman fonds')
+    .addStringOption(option =>
+      option
+        .setName('fonds')
+        .setDescription('Welk fonds wil je niet meer volgen?')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Aandelen Wereldwijd Totaal', value: 'wereldwijd' },
+          { name: 'Aandelen Verantwoorde Toekomst', value: 'verantwoord' }
+        )
+    ),
 
   new SlashCommandBuilder()
     .setName('meesman-status')
-    .setDescription('Bekijk de huidige koers van Meesman Aandelen Wereldwijd Totaal'),
+    .setDescription('Bekijk de huidige koers en statistieken van een Meesman fonds')
+    .addStringOption(option =>
+      option
+        .setName('fonds')
+        .setDescription('Welk fonds wil je bekijken?')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Aandelen Wereldwijd Totaal', value: 'wereldwijd' },
+          { name: 'Aandelen Verantwoorde Toekomst', value: 'verantwoord' }
+        )
+    ),
 
   new SlashCommandBuilder()
     .setName('meesman-history')
-    .setDescription('Toon recente koersgeschiedenis van Meesman Aandelen Wereldwijd Totaal'),
-
-  new SlashCommandBuilder()
-    .setName('meesman-check')
-    .setDescription('Controleer handmatig op koerswijzigingen')
+    .setDescription('Toon recente koersgeschiedenis van een Meesman fonds')
+    .addStringOption(option =>
+      option
+        .setName('fonds')
+        .setDescription('Welk fonds wil je bekijken?')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Aandelen Wereldwijd Totaal', value: 'wereldwijd' },
+          { name: 'Aandelen Verantwoorde Toekomst', value: 'verantwoord' }
+        )
+    )
 ].map(command => command.toJSON());
 
 const token = process.env.DISCORD_TOKEN;

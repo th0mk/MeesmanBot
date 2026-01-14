@@ -1,8 +1,22 @@
 import * as cheerio from 'cheerio';
 
-const FUND_URL = 'https://www.meesman.nl/onze-fondsen/aandelen-wereldwijd-totaal/';
+export type FundType = 'wereldwijd' | 'verantwoord';
+
+export const FUNDS: Record<FundType, { name: string; url: string; isin: string }> = {
+  wereldwijd: {
+    name: 'Aandelen Wereldwijd Totaal',
+    url: 'https://www.meesman.nl/onze-fondsen/aandelen-wereldwijd-totaal/',
+    isin: 'NL0013689110'
+  },
+  verantwoord: {
+    name: 'Aandelen Verantwoorde Toekomst',
+    url: 'https://www.meesman.nl/onze-fondsen/aandelen-verantwoorde-toekomst/',
+    isin: 'NL0015000PW1'
+  }
+};
 
 export interface FundData {
+  fundType: FundType;
   price: number | null;
   priceDate: string | null;
   isin: string | null;
@@ -12,10 +26,11 @@ export interface FundData {
 }
 
 /**
- * Fetches and parses the Meesman fund page to extract price data
+ * Fetches and parses a Meesman fund page to extract price data
  */
-export async function fetchFundData(): Promise<FundData> {
-  const response = await fetch(FUND_URL);
+export async function fetchFundData(fundType: FundType): Promise<FundData> {
+  const fund = FUNDS[fundType];
+  const response = await fetch(fund.url);
 
   if (!response.ok) {
     throw new Error(`Failed to fetch page: ${response.status}`);
@@ -25,6 +40,7 @@ export async function fetchFundData(): Promise<FundData> {
   const $ = cheerio.load(html);
 
   const data: FundData = {
+    fundType,
     price: null,
     priceDate: null,
     isin: null,
@@ -55,8 +71,8 @@ export async function fetchFundData(): Promise<FundData> {
     }
   }
 
-  // Extract ISIN code
-  const isinMatch = pageText.match(/NL\d{10}/);
+  // Extract ISIN code (format: 2 letter country + 9 alphanumeric + 1 check digit)
+  const isinMatch = pageText.match(/NL[A-Z0-9]{10}/);
   if (isinMatch) {
     data.isin = isinMatch[0];
   }

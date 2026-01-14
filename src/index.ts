@@ -10,7 +10,7 @@ import {
   TextChannel
 } from 'discord.js';
 import cron from 'node-cron';
-import { fetchFundData, calculatePercentageChange, FundData } from './scraper.js';
+import { fetchFundData, calculatePercentageChange, FundData, FundType, FUNDS } from './scraper.js';
 import {
   initDatabase,
   getSubscriptions,
@@ -30,13 +30,13 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const FUND_URL = 'https://www.meesman.nl/onze-fondsen/aandelen-wereldwijd-totaal/';
 const MEESMAN_COLOR = 0x68DDE4;
 
 /**
  * Creates components for a price update
  */
 function createPriceUpdateComponents(currentData: FundData, previousData: PriceEntry | null): ContainerBuilder[] {
+  const fund = FUNDS[currentData.fundType];
   const change = previousData
     ? calculatePercentageChange(previousData.price, currentData.price!)
     : 0;
@@ -60,7 +60,7 @@ function createPriceUpdateComponents(currentData: FundData, previousData: PriceE
   const container = new ContainerBuilder()
     .setAccentColor(MEESMAN_COLOR)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`${changeSymbol} **[Meesman Aandelen Wereldwijd Totaal](${FUND_URL})**`)
+      new TextDisplayBuilder().setContent(`${changeSymbol} **[Meesman ${fund.name}](${fund.url})**`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
@@ -90,7 +90,7 @@ function createPriceUpdateComponents(currentData: FundData, previousData: PriceE
     new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent('-# ISIN: NL0013689110')
+    new TextDisplayBuilder().setContent(`-# ISIN: ${fund.isin}`)
   );
 
   return [container];
@@ -99,8 +99,22 @@ function createPriceUpdateComponents(currentData: FundData, previousData: PriceE
 /**
  * Creates components for the current price status
  */
-function createStatusComponents(currentData: FundData, stats: PriceStats): ContainerBuilder[] {
+function createStatusComponents(currentData: FundData, stats: PriceStats, previousData: PriceEntry | null): ContainerBuilder[] {
+  const fund = FUNDS[currentData.fundType];
+  const change = previousData
+    ? calculatePercentageChange(previousData.price, currentData.price!)
+    : 0;
+
+  const changeSymbol = change > 0 ? '📈' : change < 0 ? '📉' : '➡️';
+
   let priceText = `**Huidige koers:** €${currentData.price!.toFixed(4)}`;
+
+  if (previousData) {
+    const absoluteChange = currentData.price! - previousData.price;
+    const changeSign = absoluteChange >= 0 ? '+' : '';
+    priceText += `\n**Vorige koers:** €${previousData.price.toFixed(4)}`;
+    priceText += `\n**Verschil:** ${changeSign}€${absoluteChange.toFixed(4)} (${changeSign}${change.toFixed(2)}%)`;
+  }
 
   if (currentData.priceDate) {
     priceText += `\n**Koersdatum:** ${currentData.priceDate}`;
@@ -109,7 +123,7 @@ function createStatusComponents(currentData: FundData, stats: PriceStats): Conta
   const container = new ContainerBuilder()
     .setAccentColor(MEESMAN_COLOR)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`**[Meesman Aandelen Wereldwijd Totaal](${FUND_URL})**`)
+      new TextDisplayBuilder().setContent(`${changeSymbol} **[Meesman ${fund.name}](${fund.url})**`)
     )
     .addSeparatorComponents(
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
@@ -156,40 +170,41 @@ function createStatusComponents(currentData: FundData, stats: PriceStats): Conta
     new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent('-# ISIN: NL0013689110')
+    new TextDisplayBuilder().setContent(`-# ISIN: ${fund.isin}`)
   );
 
   return [container];
 }
 
 /**
- * Checks for price updates and notifies subscribers
+ * Checks for price updates for a specific fund and notifies subscribers
  */
-async function checkForUpdates(): Promise<void> {
-  console.log(`[${new Date().toISOString()}] Checking for price updates...`);
+async function checkForUpdatesForFund(fundType: FundType): Promise<void> {
+  const fund = FUNDS[fundType];
+  console.log(`[${new Date().toISOString()}] Checking for price updates for ${fund.name}...`);
 
   try {
-    const currentData = await fetchFundData();
+    const currentData = await fetchFundData(fundType);
 
     if (!currentData.price) {
-      console.error('Failed to fetch price data');
+      console.error(`Failed to fetch price data for ${fund.name}`);
       return;
     }
 
-    const previousData = getLatestPrice();
+    const previousData = getLatestPrice(fundType);
 
     // Check if price has changed (comparing with 4 decimal precision)
     const priceChanged = !previousData ||
       Math.abs(currentData.price - previousData.price) >= 0.0001;
 
     if (priceChanged) {
-      console.log(`Price changed: ${previousData?.price ?? 'N/A'} -> ${currentData.price}`);
+      console.log(`${fund.name} price changed: ${previousData?.price ?? 'N/A'} -> ${currentData.price}`);
 
       // Save the new price
       addPriceEntry(currentData);
 
-      // Notify all subscribers
-      const subscriptions = getSubscriptions();
+      // Notify all subscribers for this fund
+      const subscriptions = getSubscriptions(fundType);
       const components = createPriceUpdateComponents(currentData, previousData);
 
       for (const sub of subscriptions) {
@@ -203,13 +218,21 @@ async function checkForUpdates(): Promise<void> {
         }
       }
 
-      console.log(`Notified ${subscriptions.length} channels`);
+      console.log(`Notified ${subscriptions.length} channels for ${fund.name}`);
     } else {
-      console.log('No price change detected');
+      console.log(`No price change detected for ${fund.name}`);
     }
   } catch (err) {
-    console.error('Error checking for updates:', err);
+    console.error(`Error checking for updates for ${fund.name}:`, err);
   }
+}
+
+/**
+ * Checks for price updates for all funds
+ */
+async function checkForUpdates(): Promise<void> {
+  await checkForUpdatesForFund('wereldwijd');
+  await checkForUpdatesForFund('verantwoord');
 }
 
 // Handle slash commands
@@ -221,6 +244,8 @@ client.on('interactionCreate', async (interaction) => {
   if (commandName === 'meesman-follow') {
     const guildId = interaction.guildId;
     const channelId = interaction.channelId;
+    const fundType = interaction.options.getString('fonds', true) as FundType;
+    const fund = FUNDS[fundType];
 
     if (!guildId) {
       await interaction.reply({
@@ -230,15 +255,15 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    const added = addSubscription(guildId, channelId);
+    const added = addSubscription(guildId, channelId, fundType);
 
     if (added) {
       await interaction.reply({
-        content: 'Dit kanaal volgt nu koersupdates van Meesman Aandelen Wereldwijd Totaal. Je ontvangt een melding wanneer de koers verandert.'
+        content: `Dit kanaal volgt nu koersupdates van Meesman ${fund.name}. Je ontvangt een melding wanneer de koers verandert.`
       });
     } else {
       await interaction.reply({
-        content: 'Dit kanaal volgt al koersupdates van Meesman Aandelen Wereldwijd Totaal.',
+        content: `Dit kanaal volgt al koersupdates van Meesman ${fund.name}.`,
         flags: MessageFlags.Ephemeral
       });
     }
@@ -247,6 +272,8 @@ client.on('interactionCreate', async (interaction) => {
   else if (commandName === 'meesman-unfollow') {
     const guildId = interaction.guildId;
     const channelId = interaction.channelId;
+    const fundType = interaction.options.getString('fonds', true) as FundType;
+    const fund = FUNDS[fundType];
 
     if (!guildId) {
       await interaction.reply({
@@ -256,46 +283,60 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    const removed = removeSubscription(guildId, channelId);
+    const removed = removeSubscription(guildId, channelId, fundType);
 
     if (removed) {
       await interaction.reply({
-        content: 'Dit kanaal volgt niet langer koersupdates van Meesman Aandelen Wereldwijd Totaal.'
+        content: `Dit kanaal volgt niet langer koersupdates van Meesman ${fund.name}.`
       });
     } else {
       await interaction.reply({
-        content: 'Dit kanaal volgde geen koersupdates van Meesman Aandelen Wereldwijd Totaal.',
+        content: `Dit kanaal volgde geen koersupdates van Meesman ${fund.name}.`,
         flags: MessageFlags.Ephemeral
       });
     }
   }
 
   else if (commandName === 'meesman-status') {
+    const fundType = interaction.options.getString('fonds', true) as FundType;
+    const fund = FUNDS[fundType];
+
     await interaction.deferReply();
 
     try {
-      const currentData = await fetchFundData();
-      const stats = getPriceStats();
+      const currentData = await fetchFundData(fundType);
+      const stats = getPriceStats(fundType);
+      const previousData = getLatestPrice(fundType);
 
       if (!currentData.price) {
-        await interaction.editReply('Kon de huidige koersgegevens niet ophalen.');
+        await interaction.editReply(`Kon de huidige koersgegevens van ${fund.name} niet ophalen.`);
         return;
       }
 
-      const components = createStatusComponents(currentData, stats);
+      // Check if price changed and save if so
+      const priceChanged = !previousData ||
+        Math.abs(currentData.price - previousData.price) >= 0.0001;
+
+      if (priceChanged) {
+        addPriceEntry(currentData);
+      }
+
+      const components = createStatusComponents(currentData, stats, previousData);
       await interaction.editReply({ components, flags: MessageFlags.IsComponentsV2 });
     } catch (err) {
       console.error('Error fetching status:', err);
-      await interaction.editReply('Er is een fout opgetreden bij het ophalen van de koersgegevens.');
+      await interaction.editReply(`Er is een fout opgetreden bij het ophalen van de koersgegevens van ${fund.name}.`);
     }
   }
 
   else if (commandName === 'meesman-history') {
-    const history = getPriceHistory(10);
+    const fundType = interaction.options.getString('fonds', true) as FundType;
+    const fund = FUNDS[fundType];
+    const history = getPriceHistory(fundType, 10);
 
     if (history.length === 0) {
       await interaction.reply({
-        content: 'Nog geen koersgeschiedenis geregistreerd.',
+        content: `Nog geen koersgeschiedenis geregistreerd voor ${fund.name}.`,
         flags: MessageFlags.Ephemeral
       });
       return;
@@ -309,7 +350,7 @@ client.on('interactionCreate', async (interaction) => {
     const container = new ContainerBuilder()
       .setAccentColor(MEESMAN_COLOR)
       .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`**[Meesman Aandelen Wereldwijd Totaal](${FUND_URL}) - Koersgeschiedenis**`)
+        new TextDisplayBuilder().setContent(`**[Meesman ${fund.name}](${fund.url}) - Koersgeschiedenis**`)
       )
       .addSeparatorComponents(
         new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
@@ -326,43 +367,11 @@ client.on('interactionCreate', async (interaction) => {
 
     await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 });
   }
-
-  else if (commandName === 'meesman-check') {
-    // Manual check for updates
-    await interaction.deferReply();
-
-    try {
-      const currentData = await fetchFundData();
-
-      if (!currentData.price) {
-        await interaction.editReply('Kon de huidige koersgegevens niet ophalen.');
-        return;
-      }
-
-      const previousData = getLatestPrice();
-      const priceChanged = !previousData ||
-        Math.abs(currentData.price - previousData.price) >= 0.0001;
-
-      if (priceChanged) {
-        addPriceEntry(currentData);
-        const components = createPriceUpdateComponents(currentData, previousData);
-        await interaction.editReply({
-          components,
-          flags: MessageFlags.IsComponentsV2
-        });
-      } else {
-        await interaction.editReply(`Geen koerswijziging. Huidige koers: €${currentData.price.toFixed(4)}`);
-      }
-    } catch (err) {
-      console.error('Error during manual check:', err);
-      await interaction.editReply('Er is een fout opgetreden bij het controleren op updates.');
-    }
-  }
 });
 
 client.once('clientReady', () => {
   console.log(`Logged in as ${client.user?.tag}`);
-  console.log(`Tracking ${getSubscriptionCount()} channels`);
+  console.log(`Tracking ${getSubscriptionCount()} channel subscriptions`);
 
   // Schedule hourly checks on Monday (1) and Tuesday (2) between 8:00 and 22:00
   cron.schedule('0 8-22 * * 1,2', () => {

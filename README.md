@@ -1,15 +1,21 @@
 # Meesman Fund Tracker Bot
 
-A Discord bot that tracks the Meesman "Aandelen Wereldwijd Totaal" fund price and notifies subscribed channels when changes are detected.
+A Discord bot that tracks Meesman fund prices and notifies subscribed channels when changes are detected.
+
+## Supported Funds
+
+- **Aandelen Wereldwijd Totaal** (NL0013689110)
+- **Aandelen Verantwoorde Toekomst** (NL0015000PW1)
 
 ## Features
 
 - Written in TypeScript with full type safety
+- Support for multiple Meesman funds via dropdown selection
 - Automatic hourly price checks on Monday and Tuesday
-- Notifications when the fund price changes
+- Notifications when fund prices change
 - Shows current price, previous price, and percentage change
 - SQLite database for persistent storage
-- Slash commands for easy interaction
+- Slash commands with fund selection dropdowns
 
 ## Setup
 
@@ -58,17 +64,18 @@ A Discord bot that tracks the Meesman "Aandelen Wereldwijd Totaal" fund price an
 
 ## Commands
 
+All commands include a fund selection dropdown to choose which fund to interact with.
+
 | Command | Description |
 |---------|-------------|
-| `/meesman-follow` | Subscribe current channel to price updates |
-| `/meesman-unfollow` | Unsubscribe current channel from price updates |
-| `/meesman-status` | Get current fund price and statistics |
-| `/meesman-history` | Show recent price history |
-| `/meesman-check` | Manually trigger a price check |
+| `/meesman-follow` | Subscribe current channel to price updates for a fund |
+| `/meesman-unfollow` | Unsubscribe current channel from price updates for a fund |
+| `/meesman-status` | Get current fund price, statistics, and check for updates |
+| `/meesman-history` | Show recent price history for a fund |
 
 ## Schedule
 
-The bot automatically checks for price updates every hour on Monday and Tuesday (Europe/Amsterdam timezone). This schedule aligns with when Meesman typically updates their fund prices.
+The bot automatically checks for price updates for all supported funds every hour on Monday and Tuesday (Europe/Amsterdam timezone). This schedule aligns with when Meesman typically updates their fund prices.
 
 ## Data Storage
 

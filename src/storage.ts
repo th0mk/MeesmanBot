@@ -1,5 +1,5 @@
 import initSqlJs, { Database, Statement } from 'sql.js';
-import type { FundData } from './scraper.js';
+import type { FundData, FundType } from './scraper.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,10 +18,12 @@ let db: Database | null = null;
 export interface Subscription {
   guildId: string;
   channelId: string;
+  fundType: FundType;
   subscribedAt: string;
 }
 
 export interface PriceEntry {
+  fundType: FundType;
   price: number;
   priceDate: string | null;
   fetchedAt: string;
@@ -55,29 +57,46 @@ export async function initDatabase(): Promise<Database> {
     db = new SQL.Database();
   }
 
-  // Initialize tables
+  // Initialize tables with fund_type support
   db.run(`
     CREATE TABLE IF NOT EXISTS subscriptions (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guild_id TEXT NOT NULL,
       channel_id TEXT NOT NULL,
+      fund_type TEXT NOT NULL DEFAULT 'wereldwijd',
       subscribed_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(guild_id, channel_id)
+      UNIQUE(guild_id, channel_id, fund_type)
     )
   `);
 
   db.run(`
     CREATE TABLE IF NOT EXISTS price_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fund_type TEXT NOT NULL DEFAULT 'wereldwijd',
       price REAL NOT NULL,
-      price_date TEXT UNIQUE,
+      price_date TEXT,
       fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
-      performances TEXT
+      performances TEXT,
+      UNIQUE(fund_type, price_date)
     )
   `);
 
+  // Migration: Add fund_type column to existing tables if missing
+  try {
+    db.run(`ALTER TABLE subscriptions ADD COLUMN fund_type TEXT NOT NULL DEFAULT 'wereldwijd'`);
+  } catch {
+    // Column already exists, ignore
+  }
+  try {
+    db.run(`ALTER TABLE price_history ADD COLUMN fund_type TEXT NOT NULL DEFAULT 'wereldwijd'`);
+  } catch {
+    // Column already exists, ignore
+  }
+
   db.run(`CREATE INDEX IF NOT EXISTS idx_subscriptions_guild ON subscriptions(guild_id)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_subscriptions_fund ON subscriptions(fund_type)`);
   db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_date ON price_history(fetched_at)`);
+  db.run(`CREATE INDEX IF NOT EXISTS idx_price_history_fund ON price_history(fund_type)`);
 
   saveDatabase();
   return db;
@@ -96,18 +115,25 @@ function saveDatabase(): void {
 // === Subscriptions ===
 
 /**
- * Gets all subscribed channels
+ * Gets all subscribed channels for a specific fund
  */
-export function getSubscriptions(): Subscription[] {
+export function getSubscriptions(fundType?: FundType): Subscription[] {
   if (!db) throw new Error('Database not initialized');
 
-  const stmt: Statement = db.prepare('SELECT guild_id, channel_id, subscribed_at FROM subscriptions');
+  const query = fundType
+    ? 'SELECT guild_id, channel_id, fund_type, subscribed_at FROM subscriptions WHERE fund_type = ?'
+    : 'SELECT guild_id, channel_id, fund_type, subscribed_at FROM subscriptions';
+
+  const stmt: Statement = db.prepare(query);
+  if (fundType) stmt.bind([fundType]);
+
   const results: Subscription[] = [];
   while (stmt.step()) {
-    const row = stmt.getAsObject() as { guild_id: string; channel_id: string; subscribed_at: string };
+    const row = stmt.getAsObject() as { guild_id: string; channel_id: string; fund_type: string; subscribed_at: string };
     results.push({
       guildId: row.guild_id,
       channelId: row.channel_id,
+      fundType: row.fund_type as FundType,
       subscribedAt: row.subscribed_at
     });
   }
@@ -116,14 +142,14 @@ export function getSubscriptions(): Subscription[] {
 }
 
 /**
- * Adds a channel subscription
+ * Adds a channel subscription for a specific fund
  * @returns True if newly subscribed, false if already subscribed
  */
-export function addSubscription(guildId: string, channelId: string): boolean {
+export function addSubscription(guildId: string, channelId: string, fundType: FundType): boolean {
   if (!db) throw new Error('Database not initialized');
 
   try {
-    db.run('INSERT INTO subscriptions (guild_id, channel_id, subscribed_at) VALUES (?, ?, datetime("now"))', [guildId, channelId]);
+    db.run('INSERT INTO subscriptions (guild_id, channel_id, fund_type, subscribed_at) VALUES (?, ?, ?, datetime("now"))', [guildId, channelId, fundType]);
     saveDatabase();
     return true;
   } catch (err) {
@@ -135,16 +161,15 @@ export function addSubscription(guildId: string, channelId: string): boolean {
 }
 
 /**
- * Removes a channel subscription
+ * Removes a channel subscription for a specific fund
  * @returns True if removed, false if not found
  */
-export function removeSubscription(guildId: string, channelId: string): boolean {
+export function removeSubscription(guildId: string, channelId: string, fundType: FundType): boolean {
   if (!db) throw new Error('Database not initialized');
 
-  const before = db.getRowsModified();
-  db.run('DELETE FROM subscriptions WHERE guild_id = ? AND channel_id = ?', [guildId, channelId]);
-  const after = db.getRowsModified();
-  if (after > before) {
+  db.run('DELETE FROM subscriptions WHERE guild_id = ? AND channel_id = ? AND fund_type = ?', [guildId, channelId, fundType]);
+  const deleted = db.getRowsModified();
+  if (deleted > 0) {
     saveDatabase();
     return true;
   }
@@ -152,13 +177,13 @@ export function removeSubscription(guildId: string, channelId: string): boolean 
 }
 
 /**
- * Checks if a channel is subscribed
+ * Checks if a channel is subscribed to a specific fund
  */
-export function isSubscribed(guildId: string, channelId: string): boolean {
+export function isSubscribed(guildId: string, channelId: string, fundType: FundType): boolean {
   if (!db) throw new Error('Database not initialized');
 
-  const stmt: Statement = db.prepare('SELECT 1 FROM subscriptions WHERE guild_id = ? AND channel_id = ?');
-  stmt.bind([guildId, channelId]);
+  const stmt: Statement = db.prepare('SELECT 1 FROM subscriptions WHERE guild_id = ? AND channel_id = ? AND fund_type = ?');
+  stmt.bind([guildId, channelId, fundType]);
   const exists = stmt.step();
   stmt.free();
   return exists;
@@ -167,10 +192,15 @@ export function isSubscribed(guildId: string, channelId: string): boolean {
 /**
  * Gets subscription count
  */
-export function getSubscriptionCount(): number {
+export function getSubscriptionCount(fundType?: FundType): number {
   if (!db) throw new Error('Database not initialized');
 
-  const stmt: Statement = db.prepare('SELECT COUNT(*) as count FROM subscriptions');
+  const query = fundType
+    ? 'SELECT COUNT(*) as count FROM subscriptions WHERE fund_type = ?'
+    : 'SELECT COUNT(*) as count FROM subscriptions';
+
+  const stmt: Statement = db.prepare(query);
+  if (fundType) stmt.bind([fundType]);
   stmt.step();
   const result = stmt.getAsObject() as { count: number };
   stmt.free();
@@ -180,22 +210,24 @@ export function getSubscriptionCount(): number {
 // === Price History ===
 
 /**
- * Gets the price history (most recent first)
+ * Gets the price history for a specific fund (most recent first)
  */
-export function getPriceHistory(limit: number = 50): PriceEntry[] {
+export function getPriceHistory(fundType: FundType, limit: number = 50): PriceEntry[] {
   if (!db) throw new Error('Database not initialized');
 
   const stmt: Statement = db.prepare(`
-    SELECT price, price_date, fetched_at, performances
+    SELECT fund_type, price, price_date, fetched_at, performances
     FROM price_history
+    WHERE fund_type = ?
     ORDER BY id DESC
     LIMIT ?
   `);
-  stmt.bind([limit]);
+  stmt.bind([fundType, limit]);
   const results: PriceEntry[] = [];
   while (stmt.step()) {
-    const row = stmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string; performances: string | null };
+    const row = stmt.getAsObject() as { fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null };
     results.push({
+      fundType: row.fund_type as FundType,
       price: row.price,
       priceDate: row.price_date,
       fetchedAt: row.fetched_at,
@@ -207,24 +239,27 @@ export function getPriceHistory(limit: number = 50): PriceEntry[] {
 }
 
 /**
- * Gets the latest recorded price entry
+ * Gets the latest recorded price entry for a specific fund
  */
-export function getLatestPrice(): PriceEntry | null {
+export function getLatestPrice(fundType: FundType): PriceEntry | null {
   if (!db) throw new Error('Database not initialized');
 
   const stmt: Statement = db.prepare(`
-    SELECT price, price_date, fetched_at, performances
+    SELECT fund_type, price, price_date, fetched_at, performances
     FROM price_history
+    WHERE fund_type = ?
     ORDER BY id DESC
     LIMIT 1
   `);
+  stmt.bind([fundType]);
   if (!stmt.step()) {
     stmt.free();
     return null;
   }
-  const row = stmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string; performances: string | null };
+  const row = stmt.getAsObject() as { fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null };
   stmt.free();
   return {
+    fundType: row.fund_type as FundType,
     price: row.price,
     priceDate: row.price_date,
     fetchedAt: row.fetched_at,
@@ -233,40 +268,15 @@ export function getLatestPrice(): PriceEntry | null {
 }
 
 /**
- * Gets the previous price entry (second most recent)
- */
-export function getPreviousPrice(): PriceEntry | null {
-  if (!db) throw new Error('Database not initialized');
-
-  const stmt: Statement = db.prepare(`
-    SELECT price, price_date, fetched_at, performances
-    FROM price_history
-    ORDER BY id DESC
-    LIMIT 1 OFFSET 1
-  `);
-  if (!stmt.step()) {
-    stmt.free();
-    return null;
-  }
-  const row = stmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string; performances: string | null };
-  stmt.free();
-  return {
-    price: row.price,
-    priceDate: row.price_date,
-    fetchedAt: row.fetched_at,
-    performances: row.performances ? JSON.parse(row.performances) : null
-  };
-}
-
-/**
- * Adds a price entry to history (updates if same price_date exists)
+ * Adds a price entry to history (updates if same fund_type and price_date exists)
  */
 export function addPriceEntry(priceData: FundData): void {
   if (!db) throw new Error('Database not initialized');
 
   db.run(
-    'INSERT OR REPLACE INTO price_history (price, price_date, fetched_at, performances) VALUES (?, ?, ?, ?)',
+    'INSERT OR REPLACE INTO price_history (fund_type, price, price_date, fetched_at, performances) VALUES (?, ?, ?, ?, ?)',
     [
+      priceData.fundType,
       priceData.price,
       priceData.priceDate ?? null,
       priceData.fetchedAt || new Date().toISOString(),
@@ -277,12 +287,13 @@ export function addPriceEntry(priceData: FundData): void {
 }
 
 /**
- * Gets price statistics
+ * Gets price statistics for a specific fund
  */
-export function getPriceStats(): PriceStats {
+export function getPriceStats(fundType: FundType): PriceStats {
   if (!db) throw new Error('Database not initialized');
 
-  const countStmt: Statement = db.prepare('SELECT COUNT(*) as count FROM price_history');
+  const countStmt: Statement = db.prepare('SELECT COUNT(*) as count FROM price_history WHERE fund_type = ?');
+  countStmt.bind([fundType]);
   countStmt.step();
   const count = (countStmt.getAsObject() as { count: number }).count;
   countStmt.free();
@@ -297,19 +308,23 @@ export function getPriceStats(): PriceStats {
       MAX(price) as highest,
       AVG(price) as average
     FROM price_history
+    WHERE fund_type = ?
   `);
+  statsStmt.bind([fundType]);
   statsStmt.step();
   const stats = statsStmt.getAsObject() as { lowest: number; highest: number; average: number };
   statsStmt.free();
 
-  const latest = getLatestPrice();
+  const latest = getLatestPrice(fundType);
 
   const oldestStmt: Statement = db.prepare(`
     SELECT price, price_date, fetched_at
     FROM price_history
+    WHERE fund_type = ?
     ORDER BY id ASC
     LIMIT 1
   `);
+  oldestStmt.bind([fundType]);
   oldestStmt.step();
   const oldest = oldestStmt.getAsObject() as { price: number; price_date: string | null; fetched_at: string };
   oldestStmt.free();
