@@ -372,8 +372,10 @@ client.once('clientReady', () => {
   console.log(`Logged in as ${client.user?.tag}`);
   console.log(`Tracking ${getSubscriptionCount()} channel subscriptions`);
 
+  checkForUpdates();
+
   // Schedule hourly checks on Monday (1) and Tuesday (2) between 8:00 and 22:00
-  cron.schedule('0 8-22 * * 1,2', () => {
+  cron.schedule('15,45 9-20 * * 1,2', () => {
     checkForUpdates();
   }, {
     timezone: 'Europe/Amsterdam'
