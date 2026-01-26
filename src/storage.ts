@@ -19,6 +19,11 @@ export interface Subscription {
   subscribedAt: string;
 }
 
+export interface GuildSettings {
+  guildId: string;
+  pingRoleId: string | null;
+}
+
 export interface PriceEntry {
   fundType: FundType;
   price: number;
@@ -65,6 +70,13 @@ export async function initDatabase(): Promise<Database> {
       fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
       performances TEXT,
       UNIQUE(fund_type, price_date)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS guild_settings (
+      guild_id TEXT PRIMARY KEY,
+      ping_role_id TEXT
     )
   `);
 
@@ -167,6 +179,32 @@ export function getSubscriptionCount(fundType?: FundType): number {
     'SELECT COUNT(*) as count FROM subscriptions'
   ).get();
   return result?.count ?? 0;
+}
+
+// === Guild Settings ===
+
+/**
+ * Gets the ping role for a guild
+ */
+export function getPingRole(guildId: string): string | null {
+  const result = db.query<{ ping_role_id: string | null }, [string]>(
+    'SELECT ping_role_id FROM guild_settings WHERE guild_id = ?'
+  ).get(guildId);
+  return result?.ping_role_id ?? null;
+}
+
+/**
+ * Sets or removes the ping role for a guild
+ */
+export function setPingRole(guildId: string, roleId: string | null): void {
+  if (roleId === null) {
+    db.run('DELETE FROM guild_settings WHERE guild_id = ?', [guildId]);
+  } else {
+    db.run(
+      'INSERT OR REPLACE INTO guild_settings (guild_id, ping_role_id) VALUES (?, ?)',
+      [guildId, roleId]
+    );
+  }
 }
 
 // === Price History ===

@@ -55,6 +55,16 @@ const commands: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [
           { name: 'Aandelen Wereldwijd Totaal', value: 'wereldwijd' },
           { name: 'Aandelen Verantwoorde Toekomst', value: 'verantwoord' }
         )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('meesman-ping-rol')
+    .setDescription('Stel een rol in die gepingt wordt bij koersupdates')
+    .addRoleOption(option =>
+      option
+        .setName('rol')
+        .setDescription('De rol om te pingen (laat leeg om ping uit te zetten)')
+        .setRequired(false)
     )
 ].map(command => command.toJSON());
 

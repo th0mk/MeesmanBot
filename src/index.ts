@@ -20,6 +20,8 @@ import {
   addPriceEntry,
   getPriceStats,
   getPriceHistory,
+  getPingRole,
+  setPingRole,
   closeDatabase,
   PriceEntry,
   PriceStats
@@ -210,7 +212,9 @@ async function checkForUpdatesForFund(fundType: FundType): Promise<void> {
         try {
           const channel = await client.channels.fetch(sub.channelId);
           if (channel && channel.isTextBased()) {
-            await (channel as TextChannel).send({ components, flags: MessageFlags.IsComponentsV2 });
+            const pingRoleId = getPingRole(sub.guildId);
+            const content = pingRoleId ? `<@&${pingRoleId}>` : undefined;
+            await (channel as TextChannel).send({ content, components, flags: MessageFlags.IsComponentsV2 });
           }
         } catch (err) {
           console.error(`Failed to send to channel ${sub.channelId}:`, (err as Error).message);
@@ -365,6 +369,41 @@ client.on('interactionCreate', async (interaction) => {
       );
 
     await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 });
+  }
+
+  else if (commandName === 'meesman-ping-rol') {
+    const guildId = interaction.guildId;
+
+    if (!guildId) {
+      await interaction.reply({
+        content: 'Dit commando kan alleen in een server gebruikt worden.',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    // Check if user has manage guild permission
+    if (!interaction.memberPermissions?.has('ManageGuild')) {
+      await interaction.reply({
+        content: 'Je hebt de "Server beheren" permissie nodig om de ping rol in te stellen.',
+        flags: MessageFlags.Ephemeral
+      });
+      return;
+    }
+
+    const role = interaction.options.getRole('rol');
+
+    if (role) {
+      setPingRole(guildId, role.id);
+      await interaction.reply({
+        content: `De rol ${role} wordt nu gepingt bij koersupdates.`
+      });
+    } else {
+      setPingRole(guildId, null);
+      await interaction.reply({
+        content: 'Ping rol verwijderd. Er wordt geen rol meer gepingt bij koersupdates.'
+      });
+    }
   }
 });
 
