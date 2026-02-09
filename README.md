@@ -82,6 +82,32 @@ All data is stored in an SQLite database at `data/meesman.db`:
 - **subscriptions**: Channels that receive price update notifications
 - **price_history**: Historical price data for tracking changes
 
+## Deployment
+
+The bot runs on Linux using `screen` for process management:
+
+```bash
+# Start a new screen session
+screen -S meesman
+
+# Install dependencies and start the bot
+bun install && bun start
+
+# Detach from session: Ctrl+A, then D
+```
+
+To reattach later:
+```bash
+screen -r meesman
+```
+
+If it says "attached" elsewhere, force reattach:
+```bash
+screen -d -r meesman
+```
+
+After pulling new code, reattach to the screen session, stop the bot with `Ctrl+C`, then run `bun install && bun start` again.
+
 ## Invite Link
 
 Generate an invite link with the following permissions:
