@@ -353,22 +353,35 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     const historyLines = history.map((entry, i) => {
-      const date = entry.priceDate || entry.fetchedAt.split('T')[0];
-      return `${i + 1}. €${entry.price.toFixed(4)} (${date})`;
-    }).join('\n');
+      const dateStr = entry.priceDate || entry.fetchedAt.split('T')[0];
+      const timestamp = Math.floor(new Date(dateStr).getTime() / 1000);
+      const prev = history[i + 1];
+      let changeText = '';
+      if (prev) {
+        const change = calculatePercentageChange(prev.price, entry.price);
+        const symbol = change > 0 ? '📈' : change < 0 ? '📉' : '➡️';
+        const sign = change >= 0 ? '+' : '';
+        changeText = ` ${symbol} ${sign}${change.toFixed(2)}%`;
+      }
+      return `€${entry.price.toFixed(4)}${changeText}\n-# <t:${timestamp}:D>`;
+    });
 
     const container = new ContainerBuilder()
       .setAccentColor(MEESMAN_COLOR)
       .addTextDisplayComponents(
         new TextDisplayBuilder().setContent(`**[Meesman ${fund.name}](${fund.url}) - Koersgeschiedenis**`)
-      )
-      .addSeparatorComponents(
+      );
+
+    for (const line of historyLines) {
+      container.addSeparatorComponents(
         new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-      )
-      .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(historyLines)
-      )
-      .addSeparatorComponents(
+      );
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(line)
+      );
+    }
+
+    container.addSeparatorComponents(
         new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
       )
       .addTextDisplayComponents(
