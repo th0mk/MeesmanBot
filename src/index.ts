@@ -36,7 +36,7 @@ const MEESMAN_COLOR = 0x68DDE4;
 /**
  * Creates components for a price update
  */
-function createPriceUpdateComponents(currentData: FundData, previousData: PriceEntry | null): ContainerBuilder[] {
+function createPriceUpdateComponents(currentData: FundData, previousData: PriceEntry | null, pingRoleId?: string | null): ContainerBuilder[] {
   const fund = FUNDS[currentData.fundType];
   const change = previousData
     ? calculatePercentageChange(previousData.price, currentData.price!)
@@ -59,7 +59,15 @@ function createPriceUpdateComponents(currentData: FundData, previousData: PriceE
   }
 
   const container = new ContainerBuilder()
-    .setAccentColor(MEESMAN_COLOR)
+    .setAccentColor(MEESMAN_COLOR);
+
+  if (pingRoleId) {
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`<@&${pingRoleId}>`)
+    );
+  }
+
+  container
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`${changeSymbol} **[Meesman ${fund.name}](${fund.url})**`)
     )
@@ -206,15 +214,14 @@ async function checkForUpdatesForFund(fundType: FundType): Promise<void> {
 
       // Notify all subscribers for this fund
       const subscriptions = getSubscriptions(fundType);
-      const components = createPriceUpdateComponents(currentData, previousData);
 
       for (const sub of subscriptions) {
         try {
           const channel = await client.channels.fetch(sub.channelId);
           if (channel && channel.isTextBased()) {
             const pingRoleId = getPingRole(sub.guildId);
-            const content = pingRoleId ? `<@&${pingRoleId}>` : undefined;
-            await (channel as TextChannel).send({ content, components, flags: MessageFlags.IsComponentsV2 });
+            const components = createPriceUpdateComponents(currentData, previousData, pingRoleId);
+            await (channel as TextChannel).send({ components, flags: MessageFlags.IsComponentsV2 });
           }
         } catch (err) {
           console.error(`Failed to send to channel ${sub.channelId}:`, (err as Error).message);
