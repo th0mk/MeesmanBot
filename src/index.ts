@@ -185,6 +185,25 @@ function createStatusComponents(currentData: FundData, stats: PriceStats, previo
   return [container];
 }
 
+async function notifySubscribers(fundType: FundType, currentData: FundData, previousData: PriceEntry | null): Promise<void> {
+  const subscriptions = getSubscriptions(fundType);
+
+  for (const sub of subscriptions) {
+    try {
+      const channel = await client.channels.fetch(sub.channelId);
+      if (channel && channel.isTextBased()) {
+        const pingRoleId = getPingRole(sub.guildId);
+        const components = createPriceUpdateComponents(currentData, previousData, pingRoleId);
+        await (channel as TextChannel).send({ components, flags: MessageFlags.IsComponentsV2 });
+      }
+    } catch (err) {
+      console.error(`Failed to send to channel ${sub.channelId}:`, (err as Error).message);
+    }
+  }
+
+  console.log(`Notified ${subscriptions.length} channels for ${FUNDS[fundType].name}`);
+}
+
 /**
  * Checks for price updates for a specific fund and notifies subscribers
  */
@@ -208,27 +227,8 @@ async function checkForUpdatesForFund(fundType: FundType): Promise<void> {
 
     if (priceChanged) {
       console.log(`${fund.name} price changed: ${previousData?.price ?? 'N/A'} -> ${currentData.price}`);
-
-      // Save the new price
       addPriceEntry(currentData);
-
-      // Notify all subscribers for this fund
-      const subscriptions = getSubscriptions(fundType);
-
-      for (const sub of subscriptions) {
-        try {
-          const channel = await client.channels.fetch(sub.channelId);
-          if (channel && channel.isTextBased()) {
-            const pingRoleId = getPingRole(sub.guildId);
-            const components = createPriceUpdateComponents(currentData, previousData, pingRoleId);
-            await (channel as TextChannel).send({ components, flags: MessageFlags.IsComponentsV2 });
-          }
-        } catch (err) {
-          console.error(`Failed to send to channel ${sub.channelId}:`, (err as Error).message);
-        }
-      }
-
-      console.log(`Notified ${subscriptions.length} channels for ${fund.name}`);
+      await notifySubscribers(fundType, currentData, previousData);
     } else {
       console.log(`No price change detected for ${fund.name}`);
     }
@@ -323,12 +323,13 @@ client.on('interactionCreate', async (interaction) => {
         return;
       }
 
-      // Check if price changed and save if so
+      // Check if price changed and save + notify subscribers if so
       const priceChanged = !previousData ||
         Math.abs(currentData.price - previousData.price) >= 0.0001;
 
       if (priceChanged) {
         addPriceEntry(currentData);
+        await notifySubscribers(fundType, currentData, previousData);
       }
 
       const components = createStatusComponents(currentData, stats, previousData);
@@ -433,14 +434,14 @@ client.once('clientReady', () => {
 
   checkForUpdates();
 
-  // Schedule hourly checks on Monday (1) and Tuesday (2) between 8:00 and 22:00
-  cron.schedule('15,45 9-20 * * 1,2', () => {
+  // Schedule hourly checks on Monday (1), Tuesday (2), and Wednesday (3) between 8:00 and 22:00
+  cron.schedule('15,45 9-20 * * 1,2,3', () => {
     checkForUpdates();
   }, {
     timezone: 'Europe/Amsterdam'
   });
 
-  console.log('Scheduled hourly price checks for Monday and Tuesday 8:00-22:00 (Europe/Amsterdam timezone)');
+  console.log('Scheduled hourly price checks for Monday, Tuesday, and Wednesday 8:00-22:00 (Europe/Amsterdam timezone)');
 });
 
 // Graceful shutdown
