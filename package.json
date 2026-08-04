@@ -11,9 +11,10 @@
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "cheerio": "^1.0.0-rc.12",
     "discord.js": "^14.25.1",
-    "node-cron": "^3.0.3",
-    "cheerio": "^1.0.0-rc.12"
+    "node-cron": "^3.0.3"
   },
   "devDependencies": {
     "@types/node-cron": "^3.0.11"

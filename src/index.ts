@@ -1,15 +1,22 @@
 import {
+  ButtonInteraction,
   Client,
   GatewayIntentBits,
   MessageFlags,
-  ContainerBuilder,
-  TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   TextChannel
 } from 'discord.js';
 import cron from 'node-cron';
-import { fetchFundData, calculatePercentageChange, FundData, FundType, FUNDS } from './scraper.js';
+import { fetchFundData, FUNDS } from './scraper.js';
+import { DEFAULT_PERIOD } from './chart.utils.js';
+import {
+  buildTrendMessage,
+  buildTrendView,
+  createHistoryComponents,
+  createPriceUpdateComponents,
+  createStatusComponents,
+  parseTrendButton,
+  trendFiles
+} from './embed.utils.js';
 import {
   initDatabase,
   getSubscriptions,
@@ -22,179 +29,32 @@ import {
   getPriceHistory,
   getPingRole,
   setPingRole,
-  closeDatabase,
-  PriceEntry,
-  PriceStats
+  closeDatabase
 } from './storage.js';
+import type { FundData, FundType } from './scraper.types.js';
+import type { PriceEntry } from './storage.types.js';
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-const MEESMAN_COLOR = 0x68DDE4;
-
-/**
- * Creates components for a price update
- */
-function createPriceUpdateComponents(currentData: FundData, previousData: PriceEntry | null, pingRoleId?: string | null): ContainerBuilder[] {
-  const fund = FUNDS[currentData.fundType];
-  const change = previousData
-    ? calculatePercentageChange(previousData.price, currentData.price!)
-    : 0;
-
-  const changeSymbol = change > 0 ? '📈' : change < 0 ? '📉' : '➡️';
-
-  // Build price info text
-  let priceText = `**Huidige koers:** €${currentData.price!.toFixed(4)}`;
-
-  if (previousData) {
-    const absoluteChange = currentData.price! - previousData.price;
-    const changeSign = absoluteChange >= 0 ? '+' : '';
-    priceText += `\n**Vorige koers:** €${previousData.price.toFixed(4)}`;
-    priceText += `\n**Verschil:** ${changeSign}€${absoluteChange.toFixed(4)} (${changeSign}${change.toFixed(2)}%)`;
-  }
-
-  if (currentData.priceDate) {
-    priceText += `\n**Koersdatum:** ${currentData.priceDate}`;
-  }
-
-  const container = new ContainerBuilder()
-    .setAccentColor(MEESMAN_COLOR);
-
-  if (pingRoleId) {
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`<@&${pingRoleId}>`)
-    );
-  }
-
-  container
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`${changeSymbol} **[Meesman ${fund.name}](${fund.url})**`)
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(priceText)
-    );
-
-  // Add performance data if available
-  if (currentData.performances && Object.keys(currentData.performances).length > 0) {
-    const perfLines = Object.entries(currentData.performances)
-      .sort(([a], [b]) => parseInt(b) - parseInt(a))
-      .slice(0, 4)
-      .map(([year, perf]) => `${year}: ${perf >= 0 ? '+' : ''}${perf.toFixed(1)}%`)
-      .join(' · ');
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`**Rendement:** ${perfLines}`)
-    );
-  }
-
-  // Footer
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-  );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`-# ISIN: ${fund.isin}`)
-  );
-
-  return [container];
-}
-
-/**
- * Creates components for the current price status
- */
-function createStatusComponents(currentData: FundData, stats: PriceStats, previousData: PriceEntry | null): ContainerBuilder[] {
-  const fund = FUNDS[currentData.fundType];
-  const change = previousData
-    ? calculatePercentageChange(previousData.price, currentData.price!)
-    : 0;
-
-  const changeSymbol = change > 0 ? '📈' : change < 0 ? '📉' : '➡️';
-
-  let priceText = `**Huidige koers:** €${currentData.price!.toFixed(4)}`;
-
-  if (previousData) {
-    const absoluteChange = currentData.price! - previousData.price;
-    const changeSign = absoluteChange >= 0 ? '+' : '';
-    priceText += `\n**Vorige koers:** €${previousData.price.toFixed(4)}`;
-    priceText += `\n**Verschil:** ${changeSign}€${absoluteChange.toFixed(4)} (${changeSign}${change.toFixed(2)}%)`;
-  }
-
-  if (currentData.priceDate) {
-    priceText += `\n**Koersdatum:** ${currentData.priceDate}`;
-  }
-
-  const container = new ContainerBuilder()
-    .setAccentColor(MEESMAN_COLOR)
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`${changeSymbol} **[Meesman ${fund.name}](${fund.url})**`)
-    )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    )
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(priceText)
-    );
-
-  // Add stats if available
-  if (stats.count > 1 && stats.highest !== undefined && stats.lowest !== undefined && stats.average !== undefined) {
-    const statsText = [
-      `**Hoogste:** €${stats.highest.toFixed(4)}`,
-      `**Laagste:** €${stats.lowest.toFixed(4)}`,
-      `**Gemiddelde:** €${stats.average.toFixed(4)}`,
-      `**Metingen:** ${stats.count}`
-    ].join(' · ');
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(statsText)
-    );
-  }
-
-  // Add performance data if available
-  if (currentData.performances && Object.keys(currentData.performances).length > 0) {
-    const perfLines = Object.entries(currentData.performances)
-      .sort(([a], [b]) => parseInt(b) - parseInt(a))
-      .slice(0, 4)
-      .map(([year, perf]) => `${year}: ${perf >= 0 ? '+' : ''}${perf.toFixed(1)}%`)
-      .join(' · ');
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`**Rendement:** ${perfLines}`)
-    );
-  }
-
-  // Footer
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-  );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`-# ISIN: ${fund.isin}`)
-  );
-
-  return [container];
-}
-
 async function notifySubscribers(fundType: FundType, currentData: FundData, previousData: PriceEntry | null): Promise<void> {
   const subscriptions = getSubscriptions(fundType);
+
+  // Rendered once and attached per message, since every channel needs its own copy
+  const trend = buildTrendView(fundType, DEFAULT_PERIOD.id, 'update');
 
   for (const sub of subscriptions) {
     try {
       const channel = await client.channels.fetch(sub.channelId);
       if (channel && channel.isTextBased()) {
         const pingRoleId = getPingRole(sub.guildId);
-        const components = createPriceUpdateComponents(currentData, previousData, pingRoleId);
-        await (channel as TextChannel).send({ components, flags: MessageFlags.IsComponentsV2 });
+        const components = createPriceUpdateComponents(currentData, previousData, trend, pingRoleId);
+        await (channel as TextChannel).send({
+          components,
+          files: trendFiles(trend),
+          flags: MessageFlags.IsComponentsV2
+        });
       }
     } catch (err) {
       console.error(`Failed to send to channel ${sub.channelId}:`, (err as Error).message);
@@ -245,8 +105,38 @@ async function checkForUpdates(): Promise<void> {
   await checkForUpdatesForFund('verantwoord');
 }
 
-// Handle slash commands
+async function handleTrendButton(interaction: ButtonInteraction): Promise<void> {
+  const button = parseTrendButton(interaction.customId);
+  if (!button) {
+    return;
+  }
+
+  try {
+    const pingRoleId = interaction.guildId ? getPingRole(interaction.guildId) : null;
+    const message = buildTrendMessage(button, pingRoleId);
+
+    if (!message) {
+      await interaction.deferUpdate();
+      return;
+    }
+
+    await interaction.update({
+      components: message.components,
+      files: message.files,
+      attachments: [],
+      flags: MessageFlags.IsComponentsV2
+    });
+  } catch (err) {
+    console.error('Failed to update price trend:', (err as Error).message);
+  }
+}
+
 client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton()) {
+    await handleTrendButton(interaction);
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   const { commandName } = interaction;
@@ -315,7 +205,6 @@ client.on('interactionCreate', async (interaction) => {
 
     try {
       const currentData = await fetchFundData(fundType);
-      const stats = getPriceStats(fundType);
       const previousData = getLatestPrice(fundType);
 
       if (!currentData.price) {
@@ -332,8 +221,14 @@ client.on('interactionCreate', async (interaction) => {
         await notifySubscribers(fundType, currentData, previousData);
       }
 
-      const components = createStatusComponents(currentData, stats, previousData);
-      await interaction.editReply({ components, flags: MessageFlags.IsComponentsV2 });
+      const stats = getPriceStats(fundType);
+      const trend = buildTrendView(fundType, DEFAULT_PERIOD.id, 'status');
+
+      await interaction.editReply({
+        components: createStatusComponents(currentData, stats, previousData, trend),
+        files: trendFiles(trend),
+        flags: MessageFlags.IsComponentsV2
+      });
     } catch (err) {
       console.error('Error fetching status:', err);
       await interaction.editReply(`Er is een fout opgetreden bij het ophalen van de koersgegevens van ${fund.name}.`);
@@ -353,43 +248,10 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
-    const historyLines = history.map((entry, i) => {
-      const dateStr = entry.priceDate || entry.fetchedAt.split('T')[0];
-      const timestamp = Math.floor(new Date(dateStr).getTime() / 1000);
-      const prev = history[i + 1];
-      let changeText = '';
-      if (prev) {
-        const change = calculatePercentageChange(prev.price, entry.price);
-        const symbol = change > 0 ? '📈' : change < 0 ? '📉' : '➡️';
-        const sign = change >= 0 ? '+' : '';
-        changeText = ` ${symbol} ${sign}${change.toFixed(2)}%`;
-      }
-      return `€${entry.price.toFixed(4)}${changeText}\n-# <t:${timestamp}:D>`;
+    await interaction.reply({
+      components: createHistoryComponents(fundType, history),
+      flags: MessageFlags.IsComponentsV2
     });
-
-    const container = new ContainerBuilder()
-      .setAccentColor(MEESMAN_COLOR)
-      .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`**[Meesman ${fund.name}](${fund.url}) - Koersgeschiedenis**`)
-      );
-
-    for (const line of historyLines) {
-      container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-      );
-      container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(line)
-      );
-    }
-
-    container.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-      )
-      .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`-# Laatste ${history.length} koersen`)
-      );
-
-    await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 });
   }
 
   else if (commandName === 'meesman-ping-rol') {

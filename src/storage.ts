@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
-import type { FundData, FundType } from './scraper.js';
+import type { FundData, FundType } from './scraper.types.js';
+import type { PriceEntry, PriceStats, Subscription } from './storage.types.js';
 
 const DATA_DIR = `${import.meta.dir}/../data`;
 const DB_PATH = `${DATA_DIR}/meesman.db`;
@@ -11,39 +12,6 @@ if (!existsSync(DATA_DIR)) {
 }
 
 const db = new Database(DB_PATH);
-
-export interface Subscription {
-  guildId: string;
-  channelId: string;
-  fundType: FundType;
-  subscribedAt: string;
-}
-
-export interface GuildSettings {
-  guildId: string;
-  pingRoleId: string | null;
-}
-
-export interface PriceEntry {
-  fundType: FundType;
-  price: number;
-  priceDate: string | null;
-  fetchedAt: string;
-  performances: Record<string, number> | null;
-}
-
-export interface PriceStats {
-  count: number;
-  latest?: PriceEntry | null;
-  oldest?: {
-    price: number;
-    priceDate: string | null;
-    fetchedAt: string;
-  } | null;
-  highest?: number;
-  lowest?: number;
-  average?: number;
-}
 
 /**
  * Initialize the database
@@ -220,6 +188,23 @@ export function getPriceHistory(fundType: FundType, limit: number = 50): PriceEn
     ORDER BY id DESC
     LIMIT ?
   `).all(fundType, limit);
+
+  return rows.map(row => ({
+    fundType: row.fund_type as FundType,
+    price: row.price,
+    priceDate: row.price_date,
+    fetchedAt: row.fetched_at,
+    performances: row.performances ? JSON.parse(row.performances) : null
+  }));
+}
+
+export function getFullPriceHistory(fundType: FundType): PriceEntry[] {
+  const rows = db.query<{ fund_type: string; price: number; price_date: string | null; fetched_at: string; performances: string | null }, [string]>(`
+    SELECT fund_type, price, price_date, fetched_at, performances
+    FROM price_history
+    WHERE fund_type = ?
+    ORDER BY COALESCE(price_date, substr(fetched_at, 1, 10)) ASC, id ASC
+  `).all(fundType);
 
   return rows.map(row => ({
     fundType: row.fund_type as FundType,

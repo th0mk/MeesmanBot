@@ -1,8 +1,7 @@
 import * as cheerio from 'cheerio';
+import type { Fund, FundData, FundType } from './scraper.types.js';
 
-export type FundType = 'wereldwijd' | 'verantwoord';
-
-export const FUNDS: Record<FundType, { name: string; url: string; isin: string }> = {
+export const FUNDS: Record<FundType, Fund> = {
   wereldwijd: {
     name: 'Aandelen Wereldwijd Totaal',
     url: 'https://www.meesman.nl/onze-fondsen/aandelen-wereldwijd-totaal/',
@@ -14,16 +13,6 @@ export const FUNDS: Record<FundType, { name: string; url: string; isin: string }
     isin: 'NL0015000PW1'
   }
 };
-
-export interface FundData {
-  fundType: FundType;
-  price: number | null;
-  priceDate: string | null;
-  isin: string | null;
-  annualCosts: number | null;
-  fetchedAt: string;
-  performances: Record<string, number>;
-}
 
 /**
  * Fetches and parses a Meesman fund page to extract price data

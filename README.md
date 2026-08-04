@@ -14,6 +14,8 @@ A Discord bot that tracks Meesman fund prices and notifies subscribed channels w
 - Automatic hourly price checks on Monday and Tuesday
 - Notifications when fund prices change
 - Shows current price, previous price, and percentage change
+- Price trend chart with a price axis and a date axis, rendered as a PNG and attached to every price update and `/meesman-status` reply
+- Buttons under the chart to switch the period between 30 days, 90 days, one year and all time
 - SQLite database for persistent storage
 - Slash commands with fund selection dropdowns
 
@@ -35,6 +37,14 @@ A Discord bot that tracks Meesman fund prices and notifies subscribed channels w
 5. Install dependencies:
    ```bash
    bun install
+   ```
+
+   The chart axis labels are drawn with a system font. On a bare Linux server
+   without any fonts installed, the chart still renders but the labels are
+   silently left out — install a font package to avoid that:
+
+   ```bash
+   sudo apt install fonts-dejavu-core
    ```
 
 6. Register slash commands:
@@ -114,9 +124,10 @@ Generate an invite link with the following permissions:
 - `View Channels`
 - `Send Messages`
 - `Embed Links`
+- `Attach Files` (required for the price trend chart)
 - `Use Application Commands`
 
 Example invite URL format:
 ```
-https://discord.com/api/oauth2/authorize?client_id=1460663524106829966&permissions=2147503104&scope=bot%20applications.commands
+https://discord.com/api/oauth2/authorize?client_id=1460663524106829966&permissions=2147535872&scope=bot%20applications.commands
 ```
