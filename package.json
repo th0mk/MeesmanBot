@@ -8,6 +8,7 @@
     "start": "bun run src/index.ts",
     "dev": "bun run --watch src/index.ts",
     "register": "bun run src/register-commands.ts",
+    "backfill": "bun run src/backfill.ts",
     "build": "bun build src/index.ts --outdir dist --target bun"
   },
   "dependencies": {

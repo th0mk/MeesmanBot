@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import type { FundData, FundType } from './scraper.types.js';
 import type { PriceEntry, PriceStats, Subscription } from './storage.types.js';
+import type { HistoricalPrice } from './backfill.types.js';
 
 const DATA_DIR = `${import.meta.dir}/../data`;
 const DB_PATH = `${DATA_DIR}/meesman.db`;
@@ -252,6 +253,29 @@ export function addPriceEntry(priceData: FundData): void {
       priceData.performances ? JSON.stringify(priceData.performances) : null
     ]
   );
+}
+
+/**
+ * Bulk-inserts historical prices, skipping any date already recorded so a
+ * backfill never overwrites an entry the bot captured live (those carry a real
+ * fetch time and performance data, which the spreadsheet does not have).
+ *
+ * @returns The number of rows actually inserted
+ */
+export function addHistoricalPrices(prices: HistoricalPrice[]): number {
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO price_history (fund_type, price, price_date, fetched_at, performances) VALUES (?, ?, ?, ?, NULL)'
+  );
+
+  const insertAll = db.transaction((entries: HistoricalPrice[]) => {
+    let inserted = 0;
+    for (const entry of entries) {
+      inserted += insert.run(entry.fundType, entry.price, entry.priceDate, `${entry.priceDate}T00:00:00.000Z`).changes;
+    }
+    return inserted;
+  });
+
+  return insertAll(prices);
 }
 
 /**
